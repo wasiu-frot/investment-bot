@@ -3,29 +3,23 @@ const express = require('express');
 const fs = require('fs');
 
 // ==========================================
-// 1. INITIALIZATION & CONFIGURATION
+// 1. CONFIGURATION & BOT SETUP
 // ==========================================
-const BOT_TOKEN = process.env.BOT_TOKEN || '8661124178:AAF7fHANTSWMbqm9O_LR9VnXGKgN7AdcK6E';
+const BOT_TOKEN = '8661124178:AAF7fHANTSWMbqm9O_LR9VnXGKgN7AdcK6E';
 const bot = new Telegraf(BOT_TOKEN);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
-const SECRET_PATH = `/telegraf/${bot.secretToken || 'secret_webhook_path'}`;
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://investment-bot-xk4d.onrender.com';
+const WEBHOOK_PATH = '/secret-webhook';
 
-// ADMIN SETTINGS (Replace 123456789 with your Telegram numeric ID)
-const ADMIN_ID = 123456789; 
-
-// DATABASE SETUP (JSON Storage)
+// ADMIN & DATABASE
+const ADMIN_ID = 123456789; // Replace with your numeric Telegram ID
 const DB_FILE = './database.json';
 let db = { users: {}, activeInvestments: [] };
 
 if (fs.existsSync(DB_FILE)) {
-  try {
-    db = JSON.parse(fs.readFileSync(DB_FILE));
-  } catch (err) {
-    console.error('Error reading database file:', err);
-  }
+  try { db = JSON.parse(fs.readFileSync(DB_FILE)); } catch (e) {}
 }
 
 function saveDB() {
@@ -33,39 +27,28 @@ function saveDB() {
 }
 
 // ==========================================
-// 2. INVESTMENT TIERS DATA
-// ==========================================
-const PLANS = {
-  plan_200: { name: 'Starter Plan', price: 200, dailyYield: 50, durationDays: 7 },
-  plan_500: { name: 'Basic Plan', price: 500, dailyYield: 130, durationDays: 7 },
-  plan_1000: { name: 'Silver Plan', price: 1000, dailyYield: 280, durationDays: 7 },
-  plan_2000: { name: 'Gold Plan', price: 2000, dailyYield: 600, durationDays: 7 },
-  plan_5000: { name: 'VIP Plan', price: 5000, dailyYield: 1600, durationDays: 7 }
-};
-
-// ==========================================
-// 3. WEBHOOK & UPTIMEROBOT SETUP
+// 2. EXPRESS & WEBHOOK ROUTING
 // ==========================================
 app.use(express.json());
 
-if (RENDER_URL) {
-  bot.telegram.setWebhook(`${RENDER_URL}${SECRET_PATH}`);
-  app.use(bot.webhookCallback(SECRET_PATH));
-  console.log(`Webhook actively pointing to: ${RENDER_URL}${SECRET_PATH}`);
-} else {
-  bot.launch();
-  console.log('Running locally with long-polling...');
-}
-
+// Main HTTP health check (for UptimeRobot)
 app.get('/', (req, res) => {
-  res.send('Naira Investment Bot Service is 100% Active and Healthy!');
+  res.send('Investment Bot Webhook is Active');
 });
 
-// ==========================================
-// 4. USER COMMANDS & MENUS
-// ==========================================
+// Register Webhook route directly
+app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
 
+// Set Telegram Webhook directly on server boot
+bot.telegram.setWebhook(`${RENDER_URL}${WEBHOOK_PATH}`)
+  .then(() => console.log(`Webhook set successfully to ${RENDER_URL}${WEBHOOK_PATH}`))
+  .catch((err) => console.error('Webhook set error:', err));
+
+// ==========================================
+// 3. BOT COMMANDS & HANDLERS
+// ==========================================
 function registerUser(ctx) {
+  if (!ctx.from) return;
   const userId = ctx.from.id;
   if (!db.users[userId]) {
     db.users[userId] = {
@@ -79,80 +62,30 @@ function registerUser(ctx) {
   }
 }
 
-// /start Command
 bot.start((ctx) => {
   registerUser(ctx);
   const text = `
-👋 *Welcome to the Smart Naira Investment Platform!*
+👋 *Welcome to Smart Naira Investment Platform!*
 
-Multiply your money daily with our secure high-yield investment tiers.
+Multiply your money daily with high-yield investment tiers.
 
 💰 *Available Tiers:*
-• ₦200  ➔ Earns ₦50 / daily
-• ₦500  ➔ Earns ₦130 / daily
+• ₦200 ➔ Earns ₦50 / daily
+• ₦500 ➔ Earns ₦130 / daily
 • ₦1,000 ➔ Earns ₦280 / daily
 • ₦2,000 ➔ Earns ₦600 / daily
 • ₦5,000 ➔ Earns ₦1,600 / daily
-
-Select an option below to begin:
   `;
 
   ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
     [Markup.button.callback('💳 Deposit / Invest', 'menu_deposit')],
     [Markup.button.callback('📊 Dashboard', 'menu_dashboard'), Markup.button.callback('📜 Plans', 'menu_plans')],
-    [Markup.button.callback('📞 Contact Admin / Support', 'menu_support')]
+    [Markup.button.callback('📞 Contact Admin', 'menu_support')]
   ]));
 });
 
-// Plans Menu
-bot.action('menu_plans', (ctx) => {
-  const text = `
-📈 *INVESTMENT PACKAGES*
-
-1️⃣ *Starter:* ₦200 (₦50 Daily for 7 Days)
-2️⃣ *Basic:* ₦500 (₦130 Daily for 7 Days)
-3️⃣ *Silver:* ₦1,000 (₦280 Daily for 7 Days)
-4️⃣ *Gold:* ₦2,000 (₦600 Daily for 7 Days)
-5️⃣ *VIP:* ₦5,000 (₦1,600 Daily for 7 Days)
-
-Tap **Deposit / Invest** to make your deposit and activate a plan!
-  `;
-  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-    [Markup.button.callback('💳 Deposit Now', 'menu_deposit')],
-    [Markup.button.callback('⬅️ Back to Main Menu', 'menu_main')]
-  ]));
-});
-
-// Main Menu Callback
-bot.action('menu_main', (ctx) => {
-  ctx.deleteMessage().catch(() => {});
-  return bot.handleUpdate({
-    ...ctx.update,
-    message: { ...ctx.update.callback_query.message, text: '/start' }
-  });
-});
-
-// Dashboard Menu
-bot.action('menu_dashboard', (ctx) => {
-  registerUser(ctx);
-  const user = db.users[ctx.from.id];
-  const text = `
-👤 *YOUR ACCOUNT DASHBOARD*
-
-• *User ID:* \`${user.id}\`
-• *Username:* @${user.username}
-• *Withdrawable Balance:* ₦${user.balance}
-• *Total Yield Earned:* ₦${user.totalEarned}
-  `;
-  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-    [Markup.button.callback('💳 Deposit / Invest', 'menu_deposit')],
-    [Markup.button.callback('⬅️ Back', 'menu_main')]
-  ]));
-});
-
-// Deposit & Bank Account Details
 bot.action('menu_deposit', (ctx) => {
-  const depositText = `
+  const text = `
 💳 *OFFICIAL PAYMENT & DEPOSIT DETAILS*
 
 Make your payment to the official account below:
@@ -163,77 +96,40 @@ Make your payment to the official account below:
 
 ---
 ⚠️ *HOW TO ACTIVATE YOUR PLAN:*
-1. Transfer the exact amount for your chosen plan (₦200 to ₦5,000).
-2. Take a screenshot of your transfer receipt.
-3. Send the receipt directly to the Admin below for instant account activation!
+1. Transfer chosen plan amount (₦200 - ₦5,000).
+2. Take a screenshot of payment receipt.
+3. Send receipt to Admin for manual activation.
   `;
-
-  ctx.replyWithMarkdown(depositText, Markup.inlineKeyboard([
-    [Markup.button.url('📩 Send Payment Receipt to Admin', 'https://t.me/YourAdminUsername')],
-    [Markup.button.callback('⬅️ Back to Main Menu', 'menu_main')]
+  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.url('📩 Send Receipt to Admin', 'https://t.me/YourAdminUsername')],
+    [Markup.button.callback('⬅️ Back', 'menu_main')]
   ]));
 });
 
-// Support Menu
+bot.action('menu_dashboard', (ctx) => {
+  registerUser(ctx);
+  const user = db.users[ctx.from.id] || { id: ctx.from.id, username: 'User', balance: 0, totalEarned: 0 };
+  ctx.replyWithMarkdown(`👤 *ACCOUNT DASHBOARD*\n\n• *User ID:* \`${user.id}\`\n• *Balance:* ₦${user.balance}\n• *Earned:* ₦${user.totalEarned}`);
+});
+
+bot.action('menu_plans', (ctx) => {
+  ctx.replyWithMarkdown('📈 *PLANS*\n1. ₦200 (₦50/day)\n2. ₦500 (₦130/day)\n3. ₦1,000 (₦280/day)\n4. ₦2,000 (₦600/day)\n5. ₦5,000 (₦1,600/day)');
+});
+
 bot.action('menu_support', (ctx) => {
-  ctx.replyWithMarkdown(
-    '💬 *Customer Support*\n\nIf you have any questions or need your payment approved, contact the admin directly:\n\n👉 @YourAdminUsername'
-  );
+  ctx.reply('Contact Admin: @YourAdminUsername');
 });
 
-// ==========================================
-// 5. ADMINISTRATIVE COMMANDS (/admin & /broadcast)
-// ==========================================
-
+// Admin commands
 bot.command('admin', (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return ctx.reply('❌ Unauthorized access.');
-  const totalUsers = Object.keys(db.users).length;
-  ctx.replyWithMarkdown(`⚙️ *ADMIN CONTROL PANEL*\n\n• *Total Subscribers:* ${totalUsers}\n\n*Commands:*\n• \`/approve <userID> <amount>\`\n• \`/broadcast <message>\``);
-});
-
-bot.command('approve', (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
-  const args = ctx.message.text.split(' ');
-  if (args.length < 3) return ctx.reply('Usage: /approve <userID> <amount>');
-
-  const targetId = args[1];
-  const amount = parseFloat(args[2]);
-
-  if (db.users[targetId]) {
-    db.users[targetId].balance += amount;
-    saveDB();
-    ctx.reply(`✅ Credited ₦${amount} to User ${targetId}`);
-    bot.telegram.sendMessage(targetId, `🎉 *Payment Approved!*\n\nYour account has been credited with ₦${amount}.`, { parse_mode: 'Markdown' }).catch(() => {});
-  } else {
-    ctx.reply('❌ User ID not found.');
-  }
-});
-
-bot.command('broadcast', async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-  const message = ctx.message.text.replace('/broadcast', '').trim();
-  if (!message) return ctx.reply('Usage: /broadcast <message>');
-
-  const userIds = Object.keys(db.users);
-  ctx.reply(`📢 Broadcasting to ${userIds.length} users...`);
-
-  let count = 0;
-  for (const id of userIds) {
-    try {
-      await bot.telegram.sendMessage(id, `📢 *ANNOUNCEMENT*\n\n${message}`, { parse_mode: 'Markdown' });
-      count++;
-    } catch (e) {}
-  }
-  ctx.reply(`✅ Broadcast complete. Sent to ${count} users.`);
+  ctx.reply(`⚙️ Admin Panel: ${Object.keys(db.users).length} users registered.`);
 });
 
 // ==========================================
-// 6. START SERVER
+// 4. START SERVER
 // ==========================================
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
