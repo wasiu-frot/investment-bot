@@ -3,7 +3,7 @@ const express = require('express');
 const fs = require('fs');
 
 // ==========================================
-// 1. INITIALIZATION & CONFIGURATION
+// 1. CONFIGURATION & SETUP
 // ==========================================
 const BOT_TOKEN = process.env.BOT_TOKEN || '8661124178:AAF7fHANTSWMbqm9O_LR9VnXGKgN7AdcK6E';
 const bot = new Telegraf(BOT_TOKEN);
@@ -16,14 +16,22 @@ const SECRET_PATH = `/telegraf/${bot.secretToken || 'secret_webhook_path'}`;
 // ADMIN SETTINGS
 const ADMIN_ID = 7829040420;
 
+// BANK DETAILS FOR DEPOSITS
+const BANK_DETAILS = {
+  bankName: 'OPay',
+  accountNumber: '8088189547',
+  accountName: 'Muhammad Rekiyatu'
+};
+
 // DATABASE SETUP (JSON Storage)
 const DB_FILE = './database.json';
-let db = { users: {}, activeInvestments: [], pendingReceipts: {} };
+let db = { users: {}, pendingDeposits: {}, pendingWithdrawals: [] };
 
 if (fs.existsSync(DB_FILE)) {
   try {
     db = JSON.parse(fs.readFileSync(DB_FILE));
-    if (!db.pendingReceipts) db.pendingReceipts = {};
+    if (!db.pendingDeposits) db.pendingDeposits = {};
+    if (!db.pendingWithdrawals) db.pendingWithdrawals = [];
   } catch (err) {
     console.error('Error reading database file:', err);
   }
@@ -37,15 +45,16 @@ function saveDB() {
 // 2. INVESTMENT TIERS DATA
 // ==========================================
 const PLANS = {
-  plan_200: { name: 'Starter Plan', price: 200, dailyYield: 50, durationDays: 7 },
-  plan_500: { name: 'Basic Plan', price: 500, dailyYield: 130, durationDays: 7 },
-  plan_1000: { name: 'Silver Plan', price: 1000, dailyYield: 280, durationDays: 7 },
-  plan_2000: { name: 'Gold Plan', price: 2000, dailyYield: 600, durationDays: 7 },
-  plan_5000: { name: 'VIP Plan', price: 5000, dailyYield: 1600, durationDays: 7 }
+  plan_200: { name: 'Starter Plan', price: 200, dailyYield: 50 },
+  plan_500: { name: 'Basic Plan', price: 500, dailyYield: 130 },
+  plan_1000: { name: 'Silver Plan', price: 1000, dailyYield: 280 },
+  plan_2000: { name: 'Gold Plan', price: 2000, dailyYield: 600 },
+  plan_5000: { name: 'VIP Plan', price: 5000, dailyYield: 1600 },
+  plan_10000: { name: 'Pro VIP Plan', price: 10000, dailyYield: 3500 }
 };
 
 // ==========================================
-// 3. WEBHOOK & EXPRESS SETUP
+// 3. EXPRESS & WEBHOOK ROUTING
 // ==========================================
 app.use(express.json());
 
@@ -59,13 +68,12 @@ if (RENDER_URL) {
 }
 
 app.get('/', (req, res) => {
-  res.send('Naira Investment Bot Service is Active!');
+  res.send('Naira Investment Bot Service is Active and Running!');
 });
 
 // ==========================================
-// 4. USER REGISTRATION & MENUS
+// 4. USER HELPER & MAIN MENU
 // ==========================================
-
 function registerUser(ctx) {
   const userId = ctx.from.id;
   if (!db.users[userId]) {
@@ -73,72 +81,46 @@ function registerUser(ctx) {
       id: userId,
       username: ctx.from.username || 'NoUsername',
       balance: 0,
-      totalEarned: 0,
+      totalInvested: 0,
       state: 'IDLE',
-      selectedPlan: null,
       joinedAt: new Date().toISOString()
     };
     saveDB();
   }
 }
 
-// /start Command
+function sendMainMenu(ctx, textOverride) {
+  registerUser(ctx);
+  const text = textOverride || `
+👋 *Welcome to Smart Naira Platform!*
+
+Fund your wallet balance, invest in daily yield packages, or request withdrawals.
+
+💰 *Wallet Balance:* ₦${db.users[ctx.from.id].balance}
+
+Select an action below:
+  `;
+
+  return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.callback('💳 Deposit Funds', 'menu_deposit'), Markup.button.callback('📈 Invest Balance', 'menu_invest')],
+    [Markup.button.callback('🏧 Withdraw Funds', 'menu_withdraw'), Markup.button.callback('📊 Dashboard', 'menu_dashboard')],
+    [Markup.button.callback('📞 Contact Support', 'menu_support')]
+  ]));
+}
+
 bot.start((ctx) => {
   registerUser(ctx);
   db.users[ctx.from.id].state = 'IDLE';
   saveDB();
-
-  const text = `
-👋 *Welcome to the Smart Naira Investment Platform!*
-
-Multiply your money daily with our secure high-yield investment tiers.
-
-💰 *Available Tiers:*
-• ₦200  ➔ Earns ₦50 / daily
-• ₦500  ➔ Earns ₦130 / daily
-• ₦1,000 ➔ Earns ₦280 / daily
-• ₦2,000 ➔ Earns ₦600 / daily
-• ₦5,000 ➔ Earns ₦1,600 / daily
-
-Select an option below to begin:
-  `;
-
-  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-    [Markup.button.callback('💳 Deposit / Invest', 'menu_deposit')],
-    [Markup.button.callback('📊 Dashboard', 'menu_dashboard'), Markup.button.callback('📜 Plans', 'menu_plans')],
-    [Markup.button.callback('📞 Contact Admin / Support', 'menu_support')]
-  ]));
+  sendMainMenu(ctx);
 });
 
-// Plans Menu
-bot.action('menu_plans', (ctx) => {
-  const text = `
-📈 *INVESTMENT PACKAGES*
-
-1️⃣ *Starter:* ₦200 (₦50 Daily for 7 Days)
-2️⃣ *Basic:* ₦500 (₦130 Daily for 7 Days)
-3️⃣ *Silver:* ₦1,000 (₦280 Daily for 7 Days)
-4️⃣ *Gold:* ₦2,000 (₦600 Daily for 7 Days)
-5️⃣ *VIP:* ₦5,000 (₦1,600 Daily for 7 Days)
-
-Tap **Deposit / Invest** to make your deposit and activate a plan!
-  `;
-  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-    [Markup.button.callback('💳 Deposit Now', 'menu_deposit')],
-    [Markup.button.callback('⬅️ Back to Main Menu', 'menu_main')]
-  ]));
-});
-
-// Main Menu Callback
 bot.action('menu_main', (ctx) => {
   registerUser(ctx);
   db.users[ctx.from.id].state = 'IDLE';
   saveDB();
   ctx.deleteMessage().catch(() => {});
-  return bot.handleUpdate({
-    ...ctx.update,
-    message: { ...ctx.update.callback_query.message, text: '/start' }
-  });
+  sendMainMenu(ctx);
 });
 
 // Dashboard Menu
@@ -146,282 +128,341 @@ bot.action('menu_dashboard', (ctx) => {
   registerUser(ctx);
   const user = db.users[ctx.from.id];
   const text = `
-👤 *YOUR ACCOUNT DASHBOARD*
+👤 *ACCOUNT DASHBOARD*
 
 • *User ID:* \`${user.id}\`
 • *Username:* @${user.username}
 • *Withdrawable Balance:* ₦${user.balance}
-• *Total Yield Earned:* ₦${user.totalEarned}
-  `;
-  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-    [Markup.button.callback('💳 Deposit / Invest', 'menu_deposit')],
-    [Markup.button.callback('⬅️ Back to Main Menu', 'menu_main')]
-  ]));
-});
-
-// Deposit Menu: Select Tier
-bot.action('menu_deposit', (ctx) => {
-  registerUser(ctx);
-  const text = `
-💳 *SELECT INVESTMENT TIER*
-
-Choose the tier you wish to deposit for:
+• *Total Amount Invested:* ₦${user.totalInvested}
   `;
 
   ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-    [Markup.button.callback('Starter (₦200)', 'select_plan_200'), Markup.button.callback('Basic (₦500)', 'select_plan_500')],
-    [Markup.button.callback('Silver (₦1,000)', 'select_plan_1000'), Markup.button.callback('Gold (₦2,000)', 'select_plan_2000')],
-    [Markup.button.callback('VIP (₦5,000)', 'select_plan_5000')],
-    [Markup.button.callback('⬅️ Back to Main Menu', 'menu_main')]
+    [Markup.button.callback('💳 Deposit Funds', 'menu_deposit'), Markup.button.callback('📈 Invest Balance', 'menu_invest')],
+    [Markup.button.callback('⬅️ Main Menu', 'menu_main')]
   ]));
-});
-
-// Handle Plan Selection
-Object.keys(PLANS).forEach((planKey) => {
-  bot.action(`select_${planKey}`, (ctx) => {
-    registerUser(ctx);
-    const plan = PLANS[planKey];
-    db.users[ctx.from.id].selectedPlan = planKey;
-    db.users[ctx.from.id].state = 'AWAITING_RECEIPT';
-    saveDB();
-
-    const depositText = `
-💳 *PAYMENT DETAILS FOR ${plan.name.toUpperCase()}*
-
-Please transfer exactly *₦${plan.price}* to the official account below:
-
-📌 *Bank Name:* OPay
-📌 *Account Number:* 8088189547
-📌 *Account Name:* Muhammad Rekiyatu
-
----
-⚠️ *INSTRUCTIONS:*
-1. Make the bank transfer of *₦${plan.price}*.
-2. Take a clear screenshot of your payment receipt.
-3. **Send the photo directly to this chat right now!**
-    `;
-
-    ctx.replyWithMarkdown(depositText, Markup.inlineKeyboard([
-      [Markup.button.callback('❌ Cancel', 'menu_main')]
-    ]));
-  });
 });
 
 // Support Menu
 bot.action('menu_support', (ctx) => {
   ctx.replyWithMarkdown(
-    '💬 *Customer Support*\n\nIf you have any questions or need help, contact the admin directly:\n\n👉 @oluwasegraphicdesigner'
+    '💬 *Customer Support*\n\nNeed assistance with deposits or withdrawals? Contact admin directly:\n\n👉 @oluwasegraphicdesigner'
   );
 });
 
 // ==========================================
-// 5. RECEIPT SUBMISSION & APPROVAL LOGIC
+// 5. DEPOSIT FLOW (FUND WALLET BALANCE)
 // ==========================================
+bot.action('menu_deposit', (ctx) => {
+  registerUser(ctx);
+  db.users[ctx.from.id].state = 'AWAITING_DEPOSIT_RECEIPT';
+  saveDB();
 
-// Handle Incoming Photos (Payment Receipts)
+  const text = `
+💳 *DEPOSIT / FUND WALLET*
+
+Transfer your deposit amount (*₦200 Minimum - ₦10,000 Maximum*) to the account below:
+
+📌 *Bank Name:* ${BANK_DETAILS.bankName}
+📌 *Account Number:* \`${BANK_DETAILS.accountNumber}\`
+📌 *Account Name:* ${BANK_DETAILS.accountName}
+
+---
+⚠️ *INSTRUCTIONS:*
+1. Make your transfer (₦200 to ₦10,000).
+2. Take a clear screenshot of your receipt.
+3. **Send the screenshot directly to this chat right now!**
+  `;
+
+  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.callback('❌ Cancel', 'menu_main')]
+  ]));
+});
+
+// Handle Deposit Receipt Submission
 bot.on('photo', async (ctx) => {
   registerUser(ctx);
   const userId = ctx.from.id;
   const user = db.users[userId];
 
-  if (user.state !== 'AWAITING_RECEIPT' || !user.selectedPlan) {
-    return ctx.reply('⚠️ Please select an investment tier first by tapping "💳 Deposit / Invest".');
+  if (user.state !== 'AWAITING_DEPOSIT_RECEIPT') {
+    return ctx.reply('⚠️ To make a deposit, please tap "💳 Deposit Funds" first.');
   }
 
-  const plan = PLANS[user.selectedPlan];
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
-  const receiptId = `REC_${Date.now()}_${userId}`;
+  const depositId = `DEP_${Date.now()}_${userId}`;
 
-  // Store receipt in database
-  db.pendingReceipts[receiptId] = {
-    id: receiptId,
+  db.pendingDeposits[depositId] = {
+    id: depositId,
     userId: userId,
     username: user.username,
-    planKey: user.selectedPlan,
-    amount: plan.price,
     date: new Date().toISOString()
   };
 
-  // Reset user state
   user.state = 'IDLE';
-  user.selectedPlan = null;
   saveDB();
 
-  // Confirm to user
-  ctx.reply('✅ *Receipt Submitted Successfully!*\n\nYour payment receipt has been sent to the admin for verification. You will be notified automatically as soon as it is approved.', { parse_mode: 'Markdown' });
+  ctx.reply('✅ *Receipt Received!*\n\nYour deposit screenshot has been sent to the admin for verification. Your wallet balance will update automatically upon approval.', { parse_mode: 'Markdown' });
 
-  // Send photo and action buttons directly to Admin
-  const adminCaption = `
+  // Forward receipt to Admin with Approval buttons
+  const caption = `
 📥 *NEW DEPOSIT RECEIPT SUBMITTED*
 
 • *User ID:* \`${userId}\`
 • *Username:* @${user.username}
-• *Selected Plan:* ${plan.name}
-• *Amount:* ₦${plan.price}
-• *Receipt ID:* \`${receiptId}\`
+• *Deposit ID:* \`${depositId}\`
+
+*Action Required:* Enter the deposit amount to credit after verifying the image.
   `;
 
   try {
     await bot.telegram.sendPhoto(ADMIN_ID, photo.file_id, {
-      caption: adminCaption,
+      caption: caption,
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
         [
-          Markup.button.callback('✅ Approve', `approve_${receiptId}`),
-          Markup.button.callback('❌ Decline', `decline_${receiptId}`)
+          Markup.button.callback('✅ Approve Deposit', `approve_dep_${depositId}`),
+          Markup.button.callback('❌ Decline', `decline_dep_${depositId}`)
         ]
       ])
     });
   } catch (err) {
-    console.error('Failed to notify admin:', err);
+    console.error('Failed to alert admin:', err);
   }
 });
 
-// Admin Button Handler: APPROVE
-bot.action(/^approve_(REC_\d+_\d+)$/, async (ctx) => {
+// Admin Approve Deposit Trigger
+bot.action(/^approve_dep_(DEP_\d+_\d+)$/, async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('❌ Unauthorized');
 
-  const receiptId = ctx.match[1];
-  const receipt = db.pendingReceipts[receiptId];
+  const depositId = ctx.match[1];
+  const deposit = db.pendingDeposits[depositId];
 
-  if (!receipt) {
-    return ctx.answerCbQuery('⚠️ Receipt already processed or expired.');
+  if (!deposit) return ctx.answerCbQuery('⚠️ Deposit request already processed.');
+
+  ctx.reply(`Please reply with the exact amount to credit User \`${deposit.userId}\` using this command format:\n\n\`/credit ${deposit.userId} ${depositId} <amount>\``, { parse_mode: 'Markdown' });
+  ctx.answerCbQuery('Action required: execute credit command.');
+});
+
+// Admin Credit Command
+bot.command('credit', (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return;
+
+  const args = ctx.message.text.split(' ');
+  if (args.length < 4) {
+    return ctx.reply('Usage: /credit <userID> <depositID> <amount>');
   }
 
-  const targetUserId = receipt.userId;
-  const amount = receipt.amount;
+  const targetId = args[1];
+  const depositId = args[2];
+  const amount = parseFloat(args[3]);
 
-  if (db.users[targetUserId]) {
-    db.users[targetUserId].balance += amount;
-    db.users[targetUserId].totalEarned += amount;
+  if (isNaN(amount) || amount < 200 || amount > 10000) {
+    return ctx.reply('❌ Invalid amount. Must be between ₦200 and ₦10,000.');
   }
 
-  delete db.pendingReceipts[receiptId];
+  if (db.users[targetId]) {
+    db.users[targetId].balance += amount;
+    delete db.pendingDeposits[depositId];
+    saveDB();
+
+    ctx.reply(`✅ Successfully credited ₦${amount} to User ${targetId}.`);
+
+    bot.telegram.sendMessage(
+      targetId,
+      `🎉 *DEPOSIT APPROVED!*\n\nYour wallet balance has been credited with *₦${amount}*. You can now tap *📈 Invest Balance* to pick a daily yield plan!`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  } else {
+    ctx.reply('❌ User not found in database.');
+  }
+});
+
+// Admin Decline Deposit
+bot.action(/^decline_dep_(DEP_\d+_\d+)$/, async (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('❌ Unauthorized');
+
+  const depositId = ctx.match[1];
+  const deposit = db.pendingDeposits[depositId];
+
+  if (!deposit) return ctx.answerCbQuery('⚠️ Already processed.');
+
+  const targetId = deposit.userId;
+  delete db.pendingDeposits[depositId];
   saveDB();
 
-  ctx.editMessageCaption(
-    `${ctx.callbackQuery.message.caption}\n\n STATUS: ✅ *APPROVED* by Admin`,
+  ctx.editMessageCaption(`${ctx.callbackQuery.message.caption}\n\nSTATUS: ❌ *DECLINED*`).catch(() => {});
+
+  bot.telegram.sendMessage(
+    targetId,
+    `❌ *DEPOSIT REJECTED*\n\nYour transfer receipt could not be verified. Please ensure the payment went through and contact support: @oluwasegraphicdesigner`,
     { parse_mode: 'Markdown' }
   ).catch(() => {});
 
-  // Notify User
-  bot.telegram.sendMessage(
-    targetUserId,
-    `🎉 *PAYMENT APPROVED!*\n\nYour transfer of *₦${amount}* has been verified and credited to your balance. Your investment yield is now active!`,
-    { parse_mode: 'Markdown' }
-  ).catch(err => console.error('Failed to notify user:', err));
-
-  ctx.answerCbQuery('Approved successfully!');
+  ctx.answerCbQuery('Deposit declined.');
 });
 
-// Admin Button Handler: DECLINE
-bot.action(/^decline_(REC_\d+_\d+)$/, async (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('❌ Unauthorized');
+// ==========================================
+// 6. INVEST FLOW (USE WALLET BALANCE)
+// ==========================================
+bot.action('menu_invest', (ctx) => {
+  registerUser(ctx);
+  const balance = db.users[ctx.from.id].balance;
 
-  const receiptId = ctx.match[1];
-  const receipt = db.pendingReceipts[receiptId];
+  const text = `
+📈 *INVESTMENT PACKAGES*
 
-  if (!receipt) {
-    return ctx.answerCbQuery('⚠️ Receipt already processed or expired.');
+Your Current Wallet Balance: *₦${balance}*
+
+Select a plan to start earning daily yield:
+  `;
+
+  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.callback('Starter: ₦200 (₦50/day)', 'invest_plan_200'), Markup.button.callback('Basic: ₦500 (₦130/day)', 'invest_plan_500')],
+    [Markup.button.callback('Silver: ₦1,000 (₦280/day)', 'invest_plan_1000'), Markup.button.callback('Gold: ₦2,000 (₦600/day)', 'invest_plan_2000')],
+    [Markup.button.callback('VIP: ₦5,000 (₦1,600/day)', 'invest_plan_5000'), Markup.button.callback('Pro VIP: ₦10,000 (₦3,500/day)', 'invest_plan_10000')],
+    [Markup.button.callback('⬅️ Main Menu', 'menu_main')]
+  ]));
+});
+
+// Process Investment Selection
+Object.keys(PLANS).forEach((planKey) => {
+  bot.action(`invest_${planKey}`, (ctx) => {
+    registerUser(ctx);
+    const userId = ctx.from.id;
+    const user = db.users[userId];
+    const plan = PLANS[planKey];
+
+    if (user.balance < plan.price) {
+      return ctx.answerCbQuery(`❌ Insufficient balance! You need ₦${plan.price}, but your balance is ₦${user.balance}. Please deposit first.`, { show_alert: true });
+    }
+
+    // Deduct balance & activate investment
+    user.balance -= plan.price;
+    user.totalInvested += plan.price;
+    saveDB();
+
+    ctx.reply(
+      `🚀 *INVESTMENT SUCCESSFUL!*\n\n• *Plan:* ${plan.name}\n• *Amount Deducted:* ₦${plan.price}\n• *Daily Yield:* ₦${plan.dailyYield}\n• *Remaining Balance:* ₦${user.balance}\n\nYour daily earnings are now actively running!`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+});
+
+// ==========================================
+// 7. WITHDRAWAL FLOW (MINIMUM ₦1,000)
+// ==========================================
+bot.action('menu_withdraw', (ctx) => {
+  registerUser(ctx);
+  const userId = ctx.from.id;
+  const user = db.users[userId];
+
+  if (user.balance < 1000) {
+    return ctx.reply(`❌ *Minimum withdrawal amount is ₦1,000.*\n\nYour current withdrawable balance is *₦${user.balance}*. Keep investing to reach ₦1,000!`, { parse_mode: 'Markdown' });
   }
 
-  const targetUserId = receipt.userId;
-  const amount = receipt.amount;
-
-  delete db.pendingReceipts[receiptId];
+  user.state = 'AWAITING_WITHDRAWAL_DETAILS';
   saveDB();
 
-  ctx.editMessageCaption(
-    `${ctx.callbackQuery.message.caption}\n\n STATUS: ❌ *DECLINED* by Admin`,
-    { parse_mode: 'Markdown' }
-  ).catch(() => {});
+  const text = `
+🏧 *WITHDRAWAL REQUEST*
 
-  // Notify User
-  bot.telegram.sendMessage(
-    targetUserId,
-    `❌ *PAYMENT DECLINED*\n\nYour receipt for *₦${amount}* could not be verified. Please double-check your bank transfer details and try again or contact support: @oluwasegraphicdesigner`,
-    { parse_mode: 'Markdown' }
-  ).catch(err => console.error('Failed to notify user:', err));
+Current Withdrawable Balance: *₦${user.balance}*
 
-  ctx.answerCbQuery('Declined successfully.');
+Please send your bank transfer details in this exact format:
+\`<Bank Name>, <Account Number>, <Account Name>, <Amount>\`
+
+*Example:*
+\`OPay, 8088189547, Muhammad Rekiyatu, 1000\`
+  `;
+
+  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.callback('❌ Cancel', 'menu_main')]
+  ]));
+});
+
+// Handle Text Messages for Withdrawal
+bot.on('text', (ctx) => {
+  registerUser(ctx);
+  const userId = ctx.from.id;
+  const user = db.users[userId];
+
+  if (user.state === 'AWAITING_WITHDRAWAL_DETAILS') {
+    const input = ctx.message.text.split(',');
+
+    if (input.length < 4) {
+      return ctx.reply('⚠️ Invalid format. Please send in this format:\n`Bank Name, Account Number, Account Name, Amount`', { parse_mode: 'Markdown' });
+    }
+
+    const bankName = input[0].trim();
+    const accountNumber = input[1].trim();
+    const accountName = input[2].trim();
+    const amount = parseFloat(input[3].trim());
+
+    if (isNaN(amount) || amount < 1000) {
+      return ctx.reply('❌ Minimum withdrawal amount is ₦1,000.');
+    }
+
+    if (amount > user.balance) {
+      return ctx.reply(`❌ Insufficient balance. Maximum you can withdraw right now is ₦${user.balance}.`);
+    }
+
+    // Deduct balance temporarily
+    user.balance -= amount;
+    user.state = 'IDLE';
+    saveDB();
+
+    ctx.reply(`✅ *Withdrawal Request Submitted!*\n\n₦${amount} has been requested for transfer to ${bankName} (${accountNumber}). Admin will process payment shortly.`, { parse_mode: 'Markdown' });
+
+    // Notify Admin
+    bot.telegram.sendMessage(
+      ADMIN_ID,
+      `🏧 *NEW WITHDRAWAL REQUEST*\n\n• *User ID:* \`${userId}\`\n• *Username:* @${user.username}\n• *Amount:* ₦${amount}\n• *Bank:* ${bankName}\n• *Account Number:* \`${accountNumber}\`\n• *Account Name:* ${accountName}`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  }
 });
 
 // ==========================================
-// 6. ADMINISTRATIVE COMMANDS (/admin & /broadcast)
+// 8. ADMIN COMMANDS (/admin & /broadcast)
 // ==========================================
-
 bot.command('admin', (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.reply('❌ Unauthorized access.');
 
   const totalUsers = Object.keys(db.users).length;
-  const pendingCount = Object.keys(db.pendingReceipts).length;
-
   const adminText = `
-⚙️ *ADMIN CONTROL PANEL*
+⚙️ *ADMIN PANEL*
 
-• *Total Users:* ${totalUsers}
-• *Pending Receipts:* ${pendingCount}
-• *Active Server:* Render Webhook Active
+• *Total Subscribers:* ${totalUsers}
 
 *Commands:*
-• \`/approve <userID> <amount>\` - Manual balance credit
-• \`/broadcast <message>\` - Send announcement to all users
+• \`/credit <userID> <depositID> <amount>\` - Credit user wallet
+• \`/broadcast <message>\` - Send message to all users
   `;
   ctx.replyWithMarkdown(adminText);
-});
-
-bot.command('approve', (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) return;
-
-  const args = ctx.message.text.split(' ');
-  if (args.length < 3) {
-    return ctx.reply('Usage: /approve <userID> <amount>');
-  }
-
-  const targetId = args[1];
-  const amount = parseFloat(args[2]);
-
-  if (db.users[targetId]) {
-    db.users[targetId].balance += amount;
-    saveDB();
-    ctx.reply(`✅ Successfully credited ₦${amount} to User ${targetId}`);
-
-    bot.telegram.sendMessage(
-      targetId,
-      `🎉 *Account Credited!*\n\nYour account has been credited with ₦${amount}.`,
-      { parse_mode: 'Markdown' }
-    ).catch(err => console.error('Failed to notify user:', err));
-  } else {
-    ctx.reply('❌ User ID not found in database.');
-  }
 });
 
 bot.command('broadcast', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
 
   const message = ctx.message.text.replace('/broadcast', '').trim();
-  if (!message) {
-    return ctx.reply('Usage: /broadcast <your message here>');
-  }
+  if (!message) return ctx.reply('Usage: /broadcast <message>');
 
   const userIds = Object.keys(db.users);
-  ctx.reply(`📢 Starting broadcast to ${userIds.length} users...`);
+  ctx.reply(`📢 Broadcasting to ${userIds.length} users...`);
 
-  let successCount = 0;
+  let count = 0;
   for (const id of userIds) {
     try {
       await bot.telegram.sendMessage(id, `📢 *ANNOUNCEMENT*\n\n${message}`, { parse_mode: 'Markdown' });
-      successCount++;
-    } catch (err) {
-      // Ignore users who blocked the bot
-    }
+      count++;
+    } catch (e) {}
   }
 
-  ctx.reply(`✅ Broadcast complete! Delivered to ${successCount} users.`);
+  ctx.reply(`✅ Broadcast sent to ${count} users.`);
 });
 
 // ==========================================
-// 7. START SERVER
+// 9. START SERVER
 // ==========================================
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
