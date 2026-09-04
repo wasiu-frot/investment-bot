@@ -88,13 +88,11 @@ function processInvestmentsAndTimers() {
       const oneDayMs = 24 * 60 * 60 * 1000;
 
       if (timeSinceLastPayout >= oneDayMs && inv.daysPaid < inv.durationDays) {
-        // Pay out 1 day yield
         user.balance += inv.dailyYield;
         inv.daysPaid += 1;
         inv.lastPayoutTime = now;
         dbChanged = true;
 
-        // Notify User of Daily Yield
         bot.telegram.sendMessage(
           userId,
           `💸 *DAILY YIELD CREDITED!*\n\nYour *${inv.planName}* has generated *₦${inv.dailyYield}* for Day ${inv.daysPaid}/${inv.durationDays}.\n\nYour new wallet balance is *₦${user.balance}*.`,
@@ -102,7 +100,6 @@ function processInvestmentsAndTimers() {
         ).catch(() => {});
       }
 
-      // Keep investment if not finished, discard if 3 days completed
       return inv.daysPaid < inv.durationDays;
     });
   });
@@ -110,10 +107,8 @@ function processInvestmentsAndTimers() {
   if (dbChanged) saveDB();
 }
 
-// Run the investment check every 1 minute
 setInterval(processInvestmentsAndTimers, 60 * 1000);
 
-// Helper function to calculate readable time left
 function getFormattedTimeLeft(targetTimeMs) {
   const diffMs = targetTimeMs - Date.now();
   if (diffMs <= 0) return 'Processing payout...';
@@ -245,7 +240,7 @@ bot.action('menu_bonus', (ctx) => {
     return ctx.reply(`🎁 *Bonus Already Claimed!*\n\nYou can claim your next daily reward in *${timeLeft}*.`, { parse_mode: 'Markdown' });
   }
 
-  const bonusAmount = Math.floor(Math.random() * 41) + 10; // ₦10 to ₦50
+  const bonusAmount = Math.floor(Math.random() * 41) + 10;
   user.balance += bonusAmount;
   user.lastBonusClaim = now;
   saveDB();
@@ -261,7 +256,7 @@ bot.action('menu_support', (ctx) => {
 });
 
 // ==========================================
-// 6. DEPOSIT FLOW (FUND WALLET BALANCE)
+// 6. DEPOSIT FLOW
 // ==========================================
 bot.action('menu_deposit', (ctx) => {
   registerUser(ctx);
@@ -321,7 +316,8 @@ bot.on('photo', async (ctx) => {
 • *Username:* @${user.username}
 • *Deposit ID:* \`${depositId}\`
 
-*Action Required:* Enter the deposit amount to credit after verifying the image.
+*Action Required:* Copy the command below to credit the user:
+\`/credit ${userId} ${depositId} <amount>\`
   `;
 
   try {
@@ -340,7 +336,6 @@ bot.on('photo', async (ctx) => {
   }
 });
 
-// Admin Approve Deposit Trigger
 bot.action(/^approve_dep_(DEP_\d+_\d+)$/, async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('❌ Unauthorized');
 
@@ -353,7 +348,7 @@ bot.action(/^approve_dep_(DEP_\d+_\d+)$/, async (ctx) => {
   ctx.answerCbQuery('Action required: execute credit command.');
 });
 
-// Admin Credit Command
+// Admin Credit Command (Robust ID Matcher)
 bot.command('credit', (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
 
@@ -362,23 +357,28 @@ bot.command('credit', (ctx) => {
     return ctx.reply('Usage: /credit <userID> <depositID> <amount>');
   }
 
-  const targetId = args[1];
-  const depositId = args[2];
-  const amount = parseFloat(args[3]);
+  const rawTargetId = args[1].trim();
+  const depositId = args[2].trim();
+  const amount = parseFloat(args[3].trim());
 
   if (isNaN(amount) || amount < 200 || amount > 10000) {
     return ctx.reply('❌ Invalid amount. Must be between 200 and 10000 without symbols.');
   }
 
-  if (db.users[targetId]) {
-    db.users[targetId].balance += amount;
+  // Exact ID matcher logic for both numbers and strings
+  const userIdKey = Object.keys(db.users).find(
+    (id) => String(id) === String(rawTargetId)
+  );
+
+  if (userIdKey && db.users[userIdKey]) {
+    db.users[userIdKey].balance += amount;
     delete db.pendingDeposits[depositId];
     saveDB();
 
-    ctx.reply(`✅ Successfully credited ₦${amount} to User ${targetId}.`);
+    ctx.reply(`✅ Successfully credited ₦${amount} to User ${userIdKey}.`);
 
     bot.telegram.sendMessage(
-      targetId,
+      userIdKey,
       `🎉 *DEPOSIT APPROVED!*\n\nYour wallet balance has been credited with *₦${amount}*. You can now tap *📈 Invest Balance* to pick a daily yield plan!`,
       { parse_mode: 'Markdown' }
     ).catch(() => {});
@@ -387,7 +387,6 @@ bot.command('credit', (ctx) => {
   }
 });
 
-// Admin Decline Deposit
 bot.action(/^decline_dep_(DEP_\d+_\d+)$/, async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery('❌ Unauthorized');
 
@@ -412,7 +411,7 @@ bot.action(/^decline_dep_(DEP_\d+_\d+)$/, async (ctx) => {
 });
 
 // ==========================================
-// 7. INVEST FLOW (START 3-DAY TIMER PLAN)
+// 7. INVEST FLOW
 // ==========================================
 bot.action('menu_invest', (ctx) => {
   registerUser(ctx);
@@ -434,7 +433,6 @@ Select a plan to start your 3-day daily yield timer:
   ]));
 });
 
-// Process Investment Selection
 Object.keys(PLANS).forEach((planKey) => {
   bot.action(`invest_${planKey}`, (ctx) => {
     registerUser(ctx);
@@ -448,7 +446,6 @@ Object.keys(PLANS).forEach((planKey) => {
 
     if (!user.activeInvestments) user.activeInvestments = [];
 
-    // Deduct balance & create active investment record
     user.balance -= plan.price;
     user.totalInvested += plan.price;
 
@@ -477,7 +474,7 @@ Object.keys(PLANS).forEach((planKey) => {
 });
 
 // ==========================================
-// 8. WITHDRAWAL FLOW (MINIMUM ₦1,000)
+// 8. WITHDRAWAL FLOW
 // ==========================================
 bot.action('menu_withdraw', (ctx) => {
   registerUser(ctx);
@@ -508,7 +505,6 @@ Please send your bank transfer details in this exact format:
   ]));
 });
 
-// Handle Text Messages for Withdrawal
 bot.on('text', (ctx) => {
   registerUser(ctx);
   const userId = ctx.from.id;
