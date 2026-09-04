@@ -42,15 +42,15 @@ function saveDB() {
 }
 
 // ==========================================
-// 2. INVESTMENT TIERS DATA
+// 2. INVESTMENT TIERS DATA (3-Day Cycle)
 // ==========================================
 const PLANS = {
-  plan_200: { name: 'Starter Plan', price: 200, dailyYield: 50 },
-  plan_500: { name: 'Basic Plan', price: 500, dailyYield: 130 },
-  plan_1000: { name: 'Silver Plan', price: 1000, dailyYield: 280 },
-  plan_2000: { name: 'Gold Plan', price: 2000, dailyYield: 600 },
-  plan_5000: { name: 'VIP Plan', price: 5000, dailyYield: 1600 },
-  plan_10000: { name: 'Pro VIP Plan', price: 10000, dailyYield: 3500 }
+  plan_200: { name: 'Starter Plan', price: 200, dailyYield: 50, durationDays: 3 },
+  plan_500: { name: 'Basic Plan', price: 500, dailyYield: 130, durationDays: 3 },
+  plan_1000: { name: 'Silver Plan', price: 1000, dailyYield: 280, durationDays: 3 },
+  plan_2000: { name: 'Gold Plan', price: 2000, dailyYield: 600, durationDays: 3 },
+  plan_5000: { name: 'VIP Plan', price: 5000, dailyYield: 1600, durationDays: 3 },
+  plan_10000: { name: 'Pro VIP Plan', price: 10000, dailyYield: 3500, durationDays: 3 }
 };
 
 // ==========================================
@@ -72,7 +72,59 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 4. USER HELPER & MAIN MENU
+// 4. AUTOMATED YIELD & TIMER ENGINE
+// ==========================================
+function processInvestmentsAndTimers() {
+  const now = Date.now();
+  let dbChanged = false;
+
+  Object.keys(db.users).forEach((userId) => {
+    const user = db.users[userId];
+    if (!user.activeInvestments) user.activeInvestments = [];
+
+    user.activeInvestments = user.activeInvestments.filter((inv) => {
+      // Check if 24 hours (86,400,000 ms) passed since last payout
+      const timeSinceLastPayout = now - inv.lastPayoutTime;
+      const oneDayMs = 24 * 60 * 60 * 1000;
+
+      if (timeSinceLastPayout >= oneDayMs && inv.daysPaid < inv.durationDays) {
+        // Pay out 1 day yield
+        user.balance += inv.dailyYield;
+        inv.daysPaid += 1;
+        inv.lastPayoutTime = now;
+        dbChanged = true;
+
+        // Notify User of Daily Yield
+        bot.telegram.sendMessage(
+          userId,
+          `💸 *DAILY YIELD CREDITED!*\n\nYour *${inv.planName}* has generated *₦${inv.dailyYield}* for Day ${inv.daysPaid}/${inv.durationDays}.\n\nYour new wallet balance is *₦${user.balance}*.`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+      }
+
+      // Keep investment if not finished, discard if 3 days completed
+      return inv.daysPaid < inv.durationDays;
+    });
+  });
+
+  if (dbChanged) saveDB();
+}
+
+// Run the investment check every 1 minute
+setInterval(processInvestmentsAndTimers, 60 * 1000);
+
+// Helper function to calculate readable time left
+function getFormattedTimeLeft(targetTimeMs) {
+  const diffMs = targetTimeMs - Date.now();
+  if (diffMs <= 0) return 'Processing payout...';
+
+  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  return `${hours}h ${minutes}m`;
+}
+
+// ==========================================
+// 5. USER HELPER & MAIN MENU
 // ==========================================
 function registerUser(ctx) {
   const userId = ctx.from.id;
@@ -83,6 +135,8 @@ function registerUser(ctx) {
       balance: 0,
       totalInvested: 0,
       state: 'IDLE',
+      lastBonusClaim: 0,
+      activeInvestments: [],
       joinedAt: new Date().toISOString()
     };
     saveDB();
@@ -94,7 +148,7 @@ function sendMainMenu(ctx, textOverride) {
   const text = textOverride || `
 👋 *Welcome to Smart Naira Platform!*
 
-Fund your wallet balance, invest in daily yield packages, or request withdrawals.
+Fund your wallet, invest in high-yield daily plans, and track earnings with live timers.
 
 💰 *Wallet Balance:* ₦${db.users[ctx.from.id].balance}
 
@@ -103,7 +157,8 @@ Select an action below:
 
   return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
     [Markup.button.callback('💳 Deposit Funds', 'menu_deposit'), Markup.button.callback('📈 Invest Balance', 'menu_invest')],
-    [Markup.button.callback('🏧 Withdraw Funds', 'menu_withdraw'), Markup.button.callback('📊 Dashboard', 'menu_dashboard')],
+    [Markup.button.callback('🏧 Withdraw Funds', 'menu_withdraw'), Markup.button.callback('⏱️ Active Timers', 'menu_timers')],
+    [Markup.button.callback('📊 Dashboard', 'menu_dashboard'), Markup.button.callback('🎁 Daily Bonus', 'menu_bonus')],
     [Markup.button.callback('📞 Contact Support', 'menu_support')]
   ]));
 }
@@ -127,19 +182,75 @@ bot.action('menu_main', (ctx) => {
 bot.action('menu_dashboard', (ctx) => {
   registerUser(ctx);
   const user = db.users[ctx.from.id];
+  const activeCount = user.activeInvestments ? user.activeInvestments.length : 0;
+
   const text = `
 👤 *ACCOUNT DASHBOARD*
 
 • *User ID:* \`${user.id}\`
 • *Username:* @${user.username}
 • *Withdrawable Balance:* ₦${user.balance}
-• *Total Amount Invested:* ₦${user.totalInvested}
+• *Total Invested:* ₦${user.totalInvested}
+• *Running Investments:* ${activeCount} active plan(s)
   `;
 
   ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.callback('⏱️ View Live Timers', 'menu_timers')],
     [Markup.button.callback('💳 Deposit Funds', 'menu_deposit'), Markup.button.callback('📈 Invest Balance', 'menu_invest')],
     [Markup.button.callback('⬅️ Main Menu', 'menu_main')]
   ]));
+});
+
+// Active Timers Menu
+bot.action('menu_timers', (ctx) => {
+  registerUser(ctx);
+  const user = db.users[ctx.from.id];
+  const active = user.activeInvestments || [];
+
+  if (active.length === 0) {
+    return ctx.reply('⏳ *No Active Investment Timers*\n\nYou currently do not have any active investment plans running. Tap "📈 Invest Balance" to start earning!', {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('📈 Invest Now', 'menu_invest')]])
+    });
+  }
+
+  let text = `⏱️ *YOUR ACTIVE INVESTMENT TIMERS*\n\n`;
+
+  active.forEach((inv, index) => {
+    const nextPayoutMs = inv.lastPayoutTime + (24 * 60 * 60 * 1000);
+    const timeLeftStr = getFormattedTimeLeft(nextPayoutMs);
+
+    text += `*${index + 1}. ${inv.planName}*\n`;
+    text += `• Daily Profit: ₦${inv.dailyYield}\n`;
+    text += `• Days Completed: Day ${inv.daysPaid} of ${inv.durationDays}\n`;
+    text += `• Next Payout In: ⏳ *${timeLeftStr}*\n\n`;
+  });
+
+  ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    [Markup.button.callback('🔄 Refresh Timers', 'menu_timers')],
+    [Markup.button.callback('⬅️ Main Menu', 'menu_main')]
+  ]));
+});
+
+// Daily Bonus Trigger
+bot.action('menu_bonus', (ctx) => {
+  registerUser(ctx);
+  const user = db.users[ctx.from.id];
+  const now = Date.now();
+  const cooldown = 24 * 60 * 60 * 1000;
+
+  if (user.lastBonusClaim && (now - user.lastBonusClaim < cooldown)) {
+    const nextClaimMs = user.lastBonusClaim + cooldown;
+    const timeLeft = getFormattedTimeLeft(nextClaimMs);
+    return ctx.reply(`🎁 *Bonus Already Claimed!*\n\nYou can claim your next daily reward in *${timeLeft}*.`, { parse_mode: 'Markdown' });
+  }
+
+  const bonusAmount = Math.floor(Math.random() * 41) + 10; // ₦10 to ₦50
+  user.balance += bonusAmount;
+  user.lastBonusClaim = now;
+  saveDB();
+
+  ctx.reply(`🎉 *DAILY REWARD CLAIMED!*\n\nYou received a free daily bonus of *₦${bonusAmount}* added to your wallet balance!`, { parse_mode: 'Markdown' });
 });
 
 // Support Menu
@@ -150,7 +261,7 @@ bot.action('menu_support', (ctx) => {
 });
 
 // ==========================================
-// 5. DEPOSIT FLOW (FUND WALLET BALANCE)
+// 6. DEPOSIT FLOW (FUND WALLET BALANCE)
 // ==========================================
 bot.action('menu_deposit', (ctx) => {
   registerUser(ctx);
@@ -203,7 +314,6 @@ bot.on('photo', async (ctx) => {
 
   ctx.reply('✅ *Receipt Received!*\n\nYour deposit screenshot has been sent to the admin for verification. Your wallet balance will update automatically upon approval.', { parse_mode: 'Markdown' });
 
-  // Forward receipt to Admin with Approval buttons
   const caption = `
 📥 *NEW DEPOSIT RECEIPT SUBMITTED*
 
@@ -257,7 +367,7 @@ bot.command('credit', (ctx) => {
   const amount = parseFloat(args[3]);
 
   if (isNaN(amount) || amount < 200 || amount > 10000) {
-    return ctx.reply('❌ Invalid amount. Must be between ₦200 and ₦10,000.');
+    return ctx.reply('❌ Invalid amount. Must be between 200 and 10000 without symbols.');
   }
 
   if (db.users[targetId]) {
@@ -302,18 +412,18 @@ bot.action(/^decline_dep_(DEP_\d+_\d+)$/, async (ctx) => {
 });
 
 // ==========================================
-// 6. INVEST FLOW (USE WALLET BALANCE)
+// 7. INVEST FLOW (START 3-DAY TIMER PLAN)
 // ==========================================
 bot.action('menu_invest', (ctx) => {
   registerUser(ctx);
   const balance = db.users[ctx.from.id].balance;
 
   const text = `
-📈 *INVESTMENT PACKAGES*
+📈 *INVESTMENT PACKAGES (3-Day Duration)*
 
 Your Current Wallet Balance: *₦${balance}*
 
-Select a plan to start earning daily yield:
+Select a plan to start your 3-day daily yield timer:
   `;
 
   ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
@@ -336,20 +446,38 @@ Object.keys(PLANS).forEach((planKey) => {
       return ctx.answerCbQuery(`❌ Insufficient balance! You need ₦${plan.price}, but your balance is ₦${user.balance}. Please deposit first.`, { show_alert: true });
     }
 
-    // Deduct balance & activate investment
+    if (!user.activeInvestments) user.activeInvestments = [];
+
+    // Deduct balance & create active investment record
     user.balance -= plan.price;
     user.totalInvested += plan.price;
+
+    const now = Date.now();
+    user.activeInvestments.push({
+      planKey: planKey,
+      planName: plan.name,
+      price: plan.price,
+      dailyYield: plan.dailyYield,
+      durationDays: plan.durationDays,
+      daysPaid: 0,
+      startTime: now,
+      lastPayoutTime: now
+    });
+
     saveDB();
 
     ctx.reply(
-      `🚀 *INVESTMENT SUCCESSFUL!*\n\n• *Plan:* ${plan.name}\n• *Amount Deducted:* ₦${plan.price}\n• *Daily Yield:* ₦${plan.dailyYield}\n• *Remaining Balance:* ₦${user.balance}\n\nYour daily earnings are now actively running!`,
-      { parse_mode: 'Markdown' }
+      `🚀 *INVESTMENT STARTED!*\n\n• *Plan:* ${plan.name}\n• *Daily Yield:* ₦${plan.dailyYield}\n• *Duration:* ${plan.durationDays} Days\n\n⏱️ Your 24-hour payout countdown timer has started! Tap "⏱️ Active Timers" in the main menu to check remaining time anytime.`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('⏱️ View Live Timer', 'menu_timers')]])
+      }
     );
   });
 });
 
 // ==========================================
-// 7. WITHDRAWAL FLOW (MINIMUM ₦1,000)
+// 8. WITHDRAWAL FLOW (MINIMUM ₦1,000)
 // ==========================================
 bot.action('menu_withdraw', (ctx) => {
   registerUser(ctx);
@@ -357,7 +485,7 @@ bot.action('menu_withdraw', (ctx) => {
   const user = db.users[userId];
 
   if (user.balance < 1000) {
-    return ctx.reply(`❌ *Minimum withdrawal amount is ₦1,000.*\n\nYour current withdrawable balance is *₦${user.balance}*. Keep investing to reach ₦1,000!`, { parse_mode: 'Markdown' });
+    return ctx.reply(`❌ *Minimum withdrawal amount is ₦1,000.*\n\nYour current withdrawable balance is *₦${user.balance}*. Keep investing or let your yield run to reach ₦1,000!`, { parse_mode: 'Markdown' });
   }
 
   user.state = 'AWAITING_WITHDRAWAL_DETAILS';
@@ -406,14 +534,12 @@ bot.on('text', (ctx) => {
       return ctx.reply(`❌ Insufficient balance. Maximum you can withdraw right now is ₦${user.balance}.`);
     }
 
-    // Deduct balance temporarily
     user.balance -= amount;
     user.state = 'IDLE';
     saveDB();
 
     ctx.reply(`✅ *Withdrawal Request Submitted!*\n\n₦${amount} has been requested for transfer to ${bankName} (${accountNumber}). Admin will process payment shortly.`, { parse_mode: 'Markdown' });
 
-    // Notify Admin
     bot.telegram.sendMessage(
       ADMIN_ID,
       `🏧 *NEW WITHDRAWAL REQUEST*\n\n• *User ID:* \`${userId}\`\n• *Username:* @${user.username}\n• *Amount:* ₦${amount}\n• *Bank:* ${bankName}\n• *Account Number:* \`${accountNumber}\`\n• *Account Name:* ${accountName}`,
@@ -423,7 +549,7 @@ bot.on('text', (ctx) => {
 });
 
 // ==========================================
-// 8. ADMIN COMMANDS (/admin & /broadcast)
+// 9. ADMIN COMMANDS
 // ==========================================
 bot.command('admin', (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return ctx.reply('❌ Unauthorized access.');
@@ -462,7 +588,7 @@ bot.command('broadcast', async (ctx) => {
 });
 
 // ==========================================
-// 9. START SERVER
+// 10. START SERVER
 // ==========================================
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
