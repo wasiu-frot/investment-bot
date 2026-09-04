@@ -5,7 +5,7 @@ const fs = require('fs');
 const ADMIN_ID = 7829040420; // Your explicit Admin ID
 const CHANNEL_USERNAME = '@invextmentchannel'; // Official channel for Force-Sub check
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf('8661124178:AAF7fHANTSWMbqm9O_LR9VnXGKgN7AdcK6E');
 const DB_FILE = './database.json';
 
 // --- DATABASE CONTROLLER ---
@@ -246,7 +246,7 @@ bot.command('calculate', (ctx) => {
   const days = parseInt(args[2]);
 
   if (isNaN(amount) || isNaN(days)) {
-    return ctx.replyWithMarkdown("⚠️ *Usage:* Send `/calculate <amount> <days>`\n*Example:* `/calculate 1000 7`");
+    return ctx.replyWithMarkdown("⚠️ *Usage:* Send `/calculate <amount> <days>`\n*Example:* `/calculate 1000 7` ");
   }
 
   const dailyRate = 0.05;
@@ -309,4 +309,3 @@ bot.launch().then(() => console.log("Naira Investment Bot Engine Online!"));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
