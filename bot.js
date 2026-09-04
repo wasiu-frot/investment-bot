@@ -1,15 +1,14 @@
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 
-// IMPORTANT: Replace this with your actual Telegram User ID to access /admin commands
-const ADMIN_ID = 123456789; 
+// YOUR CONFIGURATION
+const ADMIN_ID = 7829040420; // Your explicit Admin ID
+const CHANNEL_USERNAME = '@invextmentchannel'; // Official channel for Force-Sub check
 
-// Initialize Telegraf Bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
-// --- DATABASE CONTROLLER ---
 const DB_FILE = './database.json';
 
+// --- DATABASE CONTROLLER ---
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
     const initialData = { balances: {}, investments: {}, history: {}, referrals: {} };
@@ -25,7 +24,6 @@ function saveDB() {
 
 const db = loadDB();
 
-// Helper Functions
 function getBalance(userId) {
   return db.balances[userId] || 0;
 }
@@ -41,7 +39,42 @@ function logHistory(userId, text) {
   saveDB();
 }
 
-// --- INTERACTIVE NAVIGATION MENUS ---
+// --- FORCE SUB MIDDLEWARE ---
+async function checkChannelSub(ctx, next) {
+  const userId = ctx.from.id;
+  try {
+    const member = await ctx.telegram.getChatMember(CHANNEL_USERNAME, userId);
+    const isSubscribed = ['creator', 'administrator', 'member'].includes(member.status);
+
+    if (isSubscribed) {
+      return next();
+    } else {
+      return ctx.replyWithMarkdown(
+        `🚨 *Channel Membership Required!*\n\nYou must join our official updates channel to use this bot.\n\nJoin here: https://t.me/invextmentchannel`,
+        Markup.inlineKeyboard([
+          [Markup.button.url('📢 Join Channel', 'https://t.me/invextmentchannel')],
+          [Markup.button.callback('✅ I Have Joined', 'check_sub')]
+        ])
+      );
+    }
+  } catch (err) {
+    return next();
+  }
+}
+
+bot.use((ctx, next) => {
+  if (ctx.callbackQuery && ctx.callbackQuery.data === 'check_sub') {
+    return next();
+  }
+  return checkChannelSub(ctx, next);
+});
+
+bot.action('check_sub', async (ctx) => {
+  ctx.answerCbQuery();
+  ctx.replyWithMarkdown(`✅ *Verification Complete!* Welcome to the bot. Send /start to open the main menu.`);
+});
+
+// --- MAIN MENUS ---
 const mainMenu = Markup.inlineKeyboard([
   [Markup.button.callback('💰 My Wallet', 'btn_wallet'), Markup.button.callback('📈 Active Plans', 'btn_plans')],
   [Markup.button.callback('🚀 Invest Now', 'btn_invest'), Markup.button.callback('📥 Deposit', 'btn_deposit')],
@@ -50,15 +83,14 @@ const mainMenu = Markup.inlineKeyboard([
 ]);
 
 const investmentPlans = Markup.inlineKeyboard([
-  [Markup.button.callback('🔹 Starter ($50 - 5%/day - 7 days)', 'plan_starter')],
-  [Markup.button.callback('🔹 Pro ($200 - 7%/day - 14 days)', 'plan_pro')],
-  [Markup.button.callback('🔹 VIP ($1000 - 10%/day - 30 days)', 'plan_vip')],
+  [Markup.button.callback('⚡ Quick Plan (₦200 - ₦200 Profit in 1 Day)', 'plan_200')],
+  [Markup.button.callback('🚀 Growth Plan (₦500 - ₦1,500 Total in 3 Days)', 'plan_500')],
+  [Markup.button.callback('🔹 Starter Plan (₦1,000 - 5%/day - 7 Days)', 'plan_1000')],
+  [Markup.button.callback('🔹 VIP Plan (₦5,000 - 10%/day - 30 Days)', 'plan_vip')],
   [Markup.button.callback('🔙 Back to Main Menu', 'btn_main')]
 ]);
 
-// --- BOT LOGIC & COMMANDS ---
-
-// Start Command with Referral Handler
+// --- COMMANDS & ACTIONS ---
 bot.start((ctx) => {
   const userId = ctx.from.id;
   const startArgs = ctx.message.text.split(' ')[1];
@@ -66,137 +98,135 @@ bot.start((ctx) => {
   if (db.balances[userId] === undefined) {
     db.balances[userId] = 0;
     if (startArgs && startArgs !== String(userId)) {
-      db.referrals[userId] = startArgs; // Store referrer ID
+      db.referrals[userId] = startArgs;
     }
     saveDB();
   }
 
   ctx.replyWithMarkdown(
-    `👋 *Welcome to the Premier Investment Platform!*\n\nYour automated portfolio is active. Use the interactive menu below to manage funds, invest, or check yields:`,
+    `👋 *Welcome to the Premier Investment Platform!*\n\nYour portfolio dashboard is active. Tap any option below:`,
     mainMenu
   );
 });
 
-// Back to Main Menu Action
 bot.action('btn_main', (ctx) => {
   ctx.answerCbQuery();
   ctx.replyWithMarkdown(`📱 *Main Menu:*`, mainMenu);
 });
 
-// Wallet Summary
 bot.action('btn_wallet', (ctx) => {
   const userId = ctx.from.id;
-  const balance = getBalance(userId);
   ctx.answerCbQuery();
-  ctx.replyWithMarkdown(
-    `💳 *Your Financial Profile*\n\n💵 *Available Balance:* $${balance.toFixed(2)}\n👤 *Account ID:* \`${userId}\``,
-    mainMenu
-  );
+  ctx.replyWithMarkdown(`💳 *Your Financial Profile*\n\n💵 *Available Balance:* ₦${getBalance(userId).toLocaleString()}\n👤 *Account ID:* \`${userId}\``, mainMenu);
 });
 
-// Investment Packages Selector
 bot.action('btn_invest', (ctx) => {
   ctx.answerCbQuery();
   ctx.replyWithMarkdown(`🚀 *Select an Investment Package:*`, investmentPlans);
 });
 
-// Handling Package Purchase (Starter Example)
-bot.action('plan_starter', (ctx) => {
+// --- PACKAGE HANDLERS ---
+// 1. ₦200 for 1 Day
+bot.action('plan_200', (ctx) => {
   const userId = ctx.from.id;
-  const cost = 50;
-  const dailyYield = 2.5; // 5% of $50
-  const duration = 7;
-
+  const cost = 200;
+  const dailyYield = 200; // Returns ₦200 profit in 1 day
   ctx.answerCbQuery();
 
   if (getBalance(userId) < cost) {
-    return ctx.replyWithMarkdown(`⚠️ *Insufficient Balance!* You need $${cost} to start this plan. Deposit funds first.`, mainMenu);
+    return ctx.replyWithMarkdown(`⚠️ *Insufficient Balance!* You need ₦${cost.toLocaleString()} to activate this plan. Deposit funds first.`, mainMenu);
   }
 
-  // Deduct balance and register investment
   addBalance(userId, -cost);
   if (!db.investments[userId]) db.investments[userId] = [];
-  
-  db.investments[userId].push({
-    planName: 'Starter',
-    dailyYield: dailyYield,
-    daysLeft: duration,
-    lastPayout: Date.now()
-  });
-  
-  logHistory(userId, `Purchased Starter Plan for $${cost}`);
-  ctx.replyWithMarkdown(`🎉 *Success!* You activated the *Starter Plan*. You will earn $${dailyYield}/day for ${duration} days.`, mainMenu);
+  db.investments[userId].push({ planName: 'Quick Plan (₦200)', dailyYield, daysLeft: 1, lastPayout: Date.now() });
+
+  logHistory(userId, `Activated Quick Plan for ₦${cost}`);
+  ctx.replyWithMarkdown(`🎉 *Success!* Activated ₦200 Quick Plan (1-day duration).`, mainMenu);
 });
 
-// Deposit Gateway Information
+// 2. ₦500 for ₦1,500 Total in 3 Days (₦500/day yield)
+bot.action('plan_500', (ctx) => {
+  const userId = ctx.from.id;
+  const cost = 500;
+  const dailyYield = 500; // ₦500/day for 3 days = ₦1,500 total return
+  ctx.answerCbQuery();
+
+  if (getBalance(userId) < cost) {
+    return ctx.replyWithMarkdown(`⚠️ *Insufficient Balance!* You need ₦${cost.toLocaleString()} to activate this plan. Deposit funds first.`, mainMenu);
+  }
+
+  addBalance(userId, -cost);
+  if (!db.investments[userId]) db.investments[userId] = [];
+  db.investments[userId].push({ planName: 'Growth Plan (₦500)', dailyYield, daysLeft: 3, lastPayout: Date.now() });
+
+  logHistory(userId, `Activated Growth Plan for ₦${cost}`);
+  ctx.replyWithMarkdown(`🎉 *Success!* Activated ₦500 Growth Plan (₦500 daily for 3 days).`, mainMenu);
+});
+
+// 3. ₦1,000 Starter Plan
+bot.action('plan_1000', (ctx) => {
+  const userId = ctx.from.id;
+  const cost = 1000;
+  const dailyYield = 50; // 5% of 1,000
+  ctx.answerCbQuery();
+
+  if (getBalance(userId) < cost) {
+    return ctx.replyWithMarkdown(`⚠️ *Insufficient Balance!* You need ₦${cost.toLocaleString()} to activate this plan.`, mainMenu);
+  }
+
+  addBalance(userId, -cost);
+  if (!db.investments[userId]) db.investments[userId] = [];
+  db.investments[userId].push({ planName: 'Starter Plan (₦1,000)', dailyYield, daysLeft: 7, lastPayout: Date.now() });
+
+  logHistory(userId, `Activated Starter Plan for ₦${cost}`);
+  ctx.replyWithMarkdown(`🎉 *Success!* Activated Starter Plan (₦1,000). You will earn ₦${dailyYield}/day for 7 days.`, mainMenu);
+});
+
+// 4. ₦5,000 VIP Plan
+bot.action('plan_vip', (ctx) => {
+  const userId = ctx.from.id;
+  const cost = 5000;
+  const dailyYield = 500; // 10% of 5,000
+  ctx.answerCbQuery();
+
+  if (getBalance(userId) < cost) {
+    return ctx.replyWithMarkdown(`⚠️ *Insufficient Balance!* You need ₦${cost.toLocaleString()} to activate this plan.`, mainMenu);
+  }
+
+  addBalance(userId, -cost);
+  if (!db.investments[userId]) db.investments[userId] = [];
+  db.investments[userId].push({ planName: 'VIP Plan (₦5,000)', dailyYield, daysLeft: 30, lastPayout: Date.now() });
+
+  logHistory(userId, `Activated VIP Plan for ₦${cost}`);
+  ctx.replyWithMarkdown(`🎉 *Success!* Activated VIP Plan (₦5,000). You will earn ₦${dailyYield}/day for 30 days.`, mainMenu);
+});
+
+// Gateways & Referral
 bot.action('btn_deposit', (ctx) => {
   ctx.answerCbQuery();
-  ctx.replyWithMarkdown(
-    `📥 *Deposit Payment Gateway*\n\nTransfer your investment amount to our official USDT (TRC-20) address:\n\n\`TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t\`\n\n*Note:* After completing transfer, forward your payment receipt hash to support.`,
-    mainMenu
-  );
+  ctx.replyWithMarkdown(`📥 *Deposit Gateway*\n\nTo fund your account, please send payments via bank transfer or local deposit channels, then send receipt proof to support.`, mainMenu);
 });
 
-// Withdrawal Gateway
 bot.action('btn_withdraw', (ctx) => {
   const userId = ctx.from.id;
   const balance = getBalance(userId);
   ctx.answerCbQuery();
 
-  if (balance < 10) {
-    return ctx.replyWithMarkdown(`⚠️ *Minimum withdrawal threshold is $10.00.* Current balance: $${balance.toFixed(2)}`, mainMenu);
+  if (balance < 500) {
+    return ctx.replyWithMarkdown(`⚠️ *Minimum withdrawal limit is ₦500.* Your current balance is ₦${balance.toLocaleString()}.`, mainMenu);
   }
-  ctx.replyWithMarkdown(`📤 *Withdrawal Portal*\n\nPlease reply with your USDT TRC-20 wallet address to queue your payout request.`, mainMenu);
+  ctx.replyWithMarkdown(`📤 *Withdrawal Portal*\n\nPlease reply with your account details (Bank Name, Account Number, Account Name) to process your payout request.`, mainMenu);
 });
 
-// Referral Hub
 bot.action('btn_ref', (ctx) => {
-  const userId = ctx.from.id;
-  const refLink = `https://t.me/${ctx.botInfo.username}?start=${userId}`;
+  const refLink = `https://t.me/${ctx.botInfo.username}?start=${ctx.from.id}`;
   ctx.answerCbQuery();
-  ctx.replyWithMarkdown(
-    `👥 *Affiliate & Referral System*\n\nInvite investors and receive a 5% instant bonus on their package purchases!\n\n🔗 *Your Referral Link:*\n\`${refLink}\``,
-    mainMenu
-  );
+  ctx.replyWithMarkdown(`👥 *Referral System*\n\nShare your link to invite users and earn instant referral rewards!\n\n🔗 *Your Referral Link:*\n\`${refLink}\``, mainMenu);
 });
 
-// ROI Calculator Command
-bot.command('calculate', (ctx) => {
-  const args = ctx.message.text.split(' ');
-  const amount = parseFloat(args[1]);
-  const days = parseInt(args[2]);
-
-  if (isNaN(amount) || isNaN(days)) {
-    return ctx.replyWithMarkdown("⚠️ *Usage:* Send `/calculate <amount> <days>`\n*Example:* `/calculate 100 7`");
-  }
-
-  const dailyRate = 0.05;
-  const totalProfit = amount * dailyRate * days;
-  const totalPayout = amount + totalProfit;
-
-  const response = `
-📊 *Investment ROI Calculator*
-
-💵 *Initial Capital:* $${amount.toFixed(2)}
-⏱ *Duration:* ${days} day(s)
-📈 *Daily Yield:* ${dailyRate * 100}%
-
-🎉 *Projected Earnings:* $${totalProfit.toFixed(2)}
-💰 *Total Return:* $${totalPayout.toFixed(2)}
-  `;
-
-  ctx.replyWithMarkdown(response, mainMenu);
-});
-
-bot.action('btn_calc_info', (ctx) => {
-  ctx.answerCbQuery();
-  ctx.replyWithMarkdown("📊 *ROI Calculator Guide*\n\nType `/calculate <amount> <days>` directly in chat to calculate projected yields!");
-});
-
-// Active Investments Dashboard
 bot.action('btn_plans', (ctx) => {
-  const userId = ctx.from.id;
-  const activePlans = db.investments[userId] || [];
+  const activePlans = db.investments[ctx.from.id] || [];
   ctx.answerCbQuery();
 
   if (activePlans.length === 0) {
@@ -204,17 +234,38 @@ bot.action('btn_plans', (ctx) => {
   }
 
   let summary = `📈 *Your Active Investment Plans:*\n\n`;
-  activePlans.forEach((plan, index) => {
-    summary += `${index + 1}. *${plan.planName}* | $${plan.dailyYield}/day | Days Remaining: ${plan.daysLeft}\n`;
+  activePlans.forEach((plan, i) => {
+    summary += `${i + 1}. *${plan.planName}* | ₦${plan.dailyYield}/day | ${plan.daysLeft} days remaining\n`;
   });
   ctx.replyWithMarkdown(summary, mainMenu);
 });
 
-// --- ADMIN COMMAND SYSTEM ---
+bot.command('calculate', (ctx) => {
+  const args = ctx.message.text.split(' ');
+  const amount = parseFloat(args[1]);
+  const days = parseInt(args[2]);
+
+  if (isNaN(amount) || isNaN(days)) {
+    return ctx.replyWithMarkdown("⚠️ *Usage:* Send `/calculate <amount> <days>`\n*Example:* `/calculate 1000 7`");
+  }
+
+  const dailyRate = 0.05;
+  const totalProfit = amount * dailyRate * days;
+  const totalPayout = amount + totalProfit;
+
+  ctx.replyWithMarkdown(`📊 *Investment ROI Calculator*\n\n💵 *Initial Capital:* ₦${amount.toLocaleString()}\n⏱ *Duration:* ${days} day(s)\n📈 *Daily Rate:* ${dailyRate * 100}%\n\n🎉 *Projected Earnings:* ₦${totalProfit.toLocaleString()}\n💰 *Total Return:* ₦${totalPayout.toLocaleString()}`, mainMenu);
+});
+
+bot.action('btn_calc_info', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.replyWithMarkdown("📊 *ROI Calculator Guide*\n\nSend: `/calculate <amount> <days>`\nExample: `/calculate 1000 7` to test earnings!");
+});
+
+// --- ADMIN COMMANDS ---
 bot.command('admin', (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
   const totalUsers = Object.keys(db.balances).length;
-  ctx.replyWithMarkdown(`🛠 *Admin Control Panel*\n\n👥 *Registered Users:* ${totalUsers}\n📢 Send \`/broadcast <text>\` to alert all users.`);
+  ctx.replyWithMarkdown(`🛠 *Admin Control Panel*\n\n👤 *Admin ID:* \`${ADMIN_ID}\`\n👥 *Registered Users:* ${totalUsers}\n📢 Send \`/broadcast <your message>\` to notify everyone.`);
 });
 
 bot.command('broadcast', (ctx) => {
@@ -224,7 +275,7 @@ bot.command('broadcast', (ctx) => {
 
   const users = Object.keys(db.balances);
   users.forEach((userId) => {
-    bot.telegram.sendMessage(userId, `📢 *Official Announcement:*\n\n${message}`, { parse_mode: 'Markdown' }).catch(() => {});
+    bot.telegram.sendMessage(userId, `📢 *Announcement:*\n\n${message}`, { parse_mode: 'Markdown' }).catch(() => {});
   });
   ctx.reply(`✅ Broadcast transmitted to ${users.length} users.`);
 });
@@ -235,17 +286,17 @@ setInterval(() => {
   const DAY_MS = 24 * 60 * 60 * 1000;
 
   for (const userId in db.investments) {
-    const activePlans = db.investments[userId];
-    if (!activePlans || activePlans.length === 0) continue;
+    const plans = db.investments[userId];
+    if (!plans || plans.length === 0) continue;
 
-    db.investments[userId] = activePlans.filter((plan) => {
+    db.investments[userId] = plans.filter((plan) => {
       if (now - plan.lastPayout >= DAY_MS && plan.daysLeft > 0) {
         addBalance(userId, plan.dailyYield);
         plan.daysLeft -= 1;
         plan.lastPayout = now;
 
-        logHistory(userId, `Daily profit credited: +$${plan.dailyYield}`);
-        bot.telegram.sendMessage(userId, `💵 *Daily Interest Credited!* You received +$${plan.dailyYield} from your ${plan.planName} plan.`, { parse_mode: 'Markdown' }).catch(() => {});
+        logHistory(userId, `Daily profit credited: +₦${plan.dailyYield}`);
+        bot.telegram.sendMessage(userId, `💵 *Daily Payout Credited!* You received +₦${plan.dailyYield} from your ${plan.planName}.`, { parse_mode: 'Markdown' }).catch(() => {});
       }
       return plan.daysLeft > 0;
     });
@@ -254,7 +305,7 @@ setInterval(() => {
 }, 60 * 1000);
 
 // --- LAUNCH ENGINE ---
-bot.launch().then(() => console.log("Full-featured Investment Bot engine online!"));
+bot.launch().then(() => console.log("Naira Investment Bot Engine Online!"));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
