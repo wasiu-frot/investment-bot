@@ -14,7 +14,7 @@ const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 const SECRET_PATH = `/telegraf/${bot.secretToken || 'secret_webhook_path'}`;
 
 // ADMIN SETTINGS
-const ADMIN_ID = 123456789; // Replace with your numeric Telegram User ID
+const ADMIN_ID = 7829040420;
 
 // DATABASE SETUP (JSON Storage)
 const DB_FILE = './database.json';
@@ -170,7 +170,7 @@ Make your payment to the official account below:
   `;
 
   ctx.replyWithMarkdown(depositText, Markup.inlineKeyboard([
-    [Markup.button.url('📩 Send Payment Receipt to Admin', 'https://t.me/YourAdminUsername')],
+    [Markup.button.url('📩 Send Payment Receipt to Admin', 'https://t.me/oluwasegraphicdesigner')],
     [Markup.button.callback('⬅️ Back to Main Menu', 'menu_main')]
   ]));
 });
@@ -178,7 +178,7 @@ Make your payment to the official account below:
 // Support Menu
 bot.action('menu_support', (ctx) => {
   ctx.replyWithMarkdown(
-    '💬 *Customer Support*\n\nIf you have any questions or need your payment approved, contact the admin directly:\n\n👉 @YourAdminUsername'
+    '💬 *Customer Support*\n\nIf you have any questions or need your payment approved, contact the admin directly:\n\n👉 @oluwasegraphicdesigner'
   );
 });
 
