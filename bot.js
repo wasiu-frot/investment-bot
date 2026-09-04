@@ -1,3 +1,6 @@
+const http = require('http');
+http.createServer((req, res) => res.end('Bot running')).listen(process.env.PORT || 3000);
+
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 
@@ -130,7 +133,7 @@ bot.action('btn_invest', (ctx) => {
 bot.action('plan_200', (ctx) => {
   const userId = ctx.from.id;
   const cost = 200;
-  const dailyYield = 200; // Returns ₦200 profit in 1 day
+  const dailyYield = 200;
   ctx.answerCbQuery();
 
   if (getBalance(userId) < cost) {
@@ -145,11 +148,11 @@ bot.action('plan_200', (ctx) => {
   ctx.replyWithMarkdown(`🎉 *Success!* Activated ₦200 Quick Plan (1-day duration).`, mainMenu);
 });
 
-// 2. ₦500 for ₦1,500 Total in 3 Days (₦500/day yield)
+// 2. ₦500 for ₦1,500 Total in 3 Days
 bot.action('plan_500', (ctx) => {
   const userId = ctx.from.id;
   const cost = 500;
-  const dailyYield = 500; // ₦500/day for 3 days = ₦1,500 total return
+  const dailyYield = 500;
   ctx.answerCbQuery();
 
   if (getBalance(userId) < cost) {
@@ -168,7 +171,7 @@ bot.action('plan_500', (ctx) => {
 bot.action('plan_1000', (ctx) => {
   const userId = ctx.from.id;
   const cost = 1000;
-  const dailyYield = 50; // 5% of 1,000
+  const dailyYield = 50;
   ctx.answerCbQuery();
 
   if (getBalance(userId) < cost) {
@@ -187,7 +190,7 @@ bot.action('plan_1000', (ctx) => {
 bot.action('plan_vip', (ctx) => {
   const userId = ctx.from.id;
   const cost = 5000;
-  const dailyYield = 500; // 10% of 5,000
+  const dailyYield = 500;
   ctx.answerCbQuery();
 
   if (getBalance(userId) < cost) {
