@@ -1,0 +1,51 @@
+{
+  "balances": {
+    "7992438254": 0
+  },
+  "investments": {
+    "7992438254": [
+      {
+        "plan": "STARTER",
+        "amount": 200,
+        "expectedReturn": 500,
+        "daysLeft": 1,
+        "dailyYield": 500
+      },
+      {
+        "plan": "STARTER",
+        "amount": 200,
+        "expectedReturn": 500,
+        "daysLeft": 1,
+        "dailyYield": 500
+      },
+      {
+        "plan": "STARTER",
+        "amount": 200,
+        "expectedReturn": 500,
+        "daysLeft": 1,
+        "dailyYield": 500,
+        "lastPayout": 1788457725790
+      }
+    ]
+  },
+  "pending": {
+    "TX378458": {
+      "userId": 7992438254,
+      "status": "APPROVED"
+    },
+    "TX365304": {
+      "userId": 7992438254,
+      "status": "PENDING"
+    }
+  },
+  "withdrawals": {},
+  "referredBy": {},
+  "users": [
+    7992438254
+  ],
+  "history": {
+    "7992438254": [
+      "[6:48:45 PM] Activated STARTER plan (-₦200)"
+    ]
+  }
+}
