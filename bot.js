@@ -5,7 +5,7 @@ const fs = require('fs');
 // ==========================================
 // 1. INITIALIZATION & CONFIGURATION
 // ==========================================
-const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8661124178:AAF7fHANTSWMbqm9O_LR9VnXGKgN7AdcK6E';
 const bot = new Telegraf(BOT_TOKEN);
 
 const app = express();
@@ -13,8 +13,8 @@ const PORT = process.env.PORT || 3000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 const SECRET_PATH = `/telegraf/${bot.secretToken || 'secret_webhook_path'}`;
 
-// ADMIN SETTINGS
-const ADMIN_ID = 123456789; // Replace with your numeric Telegram User ID
+// ADMIN SETTINGS (Replace 123456789 with your Telegram numeric ID)
+const ADMIN_ID = 123456789; 
 
 // DATABASE SETUP (JSON Storage)
 const DB_FILE = './database.json';
@@ -65,7 +65,6 @@ app.get('/', (req, res) => {
 // 4. USER COMMANDS & MENUS
 // ==========================================
 
-// Helper to ensure user exists in database
 function registerUser(ctx) {
   const userId = ctx.from.id;
   if (!db.users[userId]) {
@@ -186,34 +185,16 @@ bot.action('menu_support', (ctx) => {
 // 5. ADMINISTRATIVE COMMANDS (/admin & /broadcast)
 // ==========================================
 
-// /admin Panel
 bot.command('admin', (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) {
-    return ctx.reply('❌ Unauthorized access.');
-  }
-
+  if (ctx.from.id !== ADMIN_ID) return ctx.reply('❌ Unauthorized access.');
   const totalUsers = Object.keys(db.users).length;
-  const adminText = `
-⚙️ *ADMIN CONTROL PANEL*
-
-• *Total Subscribers:* ${totalUsers}
-• *Active Server:* Render Webhook Active
-
-*Commands:*
-• \`/approve <userID> <amount>\` - Credit user balance/plan
-• \`/broadcast <message>\` - Broadcast message to all subscribers
-  `;
-  ctx.replyWithMarkdown(adminText);
+  ctx.replyWithMarkdown(`⚙️ *ADMIN CONTROL PANEL*\n\n• *Total Subscribers:* ${totalUsers}\n\n*Commands:*\n• \`/approve <userID> <amount>\`\n• \`/broadcast <message>\``);
 });
 
-// Manual Credit Approval Command
 bot.command('approve', (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
-
   const args = ctx.message.text.split(' ');
-  if (args.length < 3) {
-    return ctx.reply('Usage: /approve <userID> <amount>');
-  }
+  if (args.length < 3) return ctx.reply('Usage: /approve <userID> <amount>');
 
   const targetId = args[1];
   const amount = parseFloat(args[2]);
@@ -221,42 +202,29 @@ bot.command('approve', (ctx) => {
   if (db.users[targetId]) {
     db.users[targetId].balance += amount;
     saveDB();
-    ctx.reply(`✅ Successfully credited ₦${amount} to User ${targetId}`);
-    
-    // Notify User
-    bot.telegram.sendMessage(
-      targetId,
-      `🎉 *Payment Approved!*\n\nYour account has been credited with ₦${amount}. Your daily yield is now active!`,
-      { parse_mode: 'Markdown' }
-    ).catch(err => console.error('Failed to notify user:', err));
+    ctx.reply(`✅ Credited ₦${amount} to User ${targetId}`);
+    bot.telegram.sendMessage(targetId, `🎉 *Payment Approved!*\n\nYour account has been credited with ₦${amount}.`, { parse_mode: 'Markdown' }).catch(() => {});
   } else {
-    ctx.reply('❌ User ID not found in database.');
+    ctx.reply('❌ User ID not found.');
   }
 });
 
-// Broadcast Command to all 8,000 Subscribers
 bot.command('broadcast', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
-
   const message = ctx.message.text.replace('/broadcast', '').trim();
-  if (!message) {
-    return ctx.reply('Usage: /broadcast <your message here>');
-  }
+  if (!message) return ctx.reply('Usage: /broadcast <message>');
 
   const userIds = Object.keys(db.users);
-  ctx.reply(`📢 Starting broadcast to ${userIds.length} users...`);
+  ctx.reply(`📢 Broadcasting to ${userIds.length} users...`);
 
-  let successCount = 0;
+  let count = 0;
   for (const id of userIds) {
     try {
       await bot.telegram.sendMessage(id, `📢 *ANNOUNCEMENT*\n\n${message}`, { parse_mode: 'Markdown' });
-      successCount++;
-    } catch (err) {
-      // Ignore errors for users who blocked the bot
-    }
+      count++;
+    } catch (e) {}
   }
-
-  ctx.reply(`✅ Broadcast complete! Successfully delivered to ${successCount} users.`);
+  ctx.reply(`✅ Broadcast complete. Sent to ${count} users.`);
 });
 
 // ==========================================
